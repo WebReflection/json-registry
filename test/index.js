@@ -1,5 +1,17 @@
-import * as flatted from 'https://esm.run/flatted';
+import * as flatted from 'flatted';
 import JSONRegistry from '../src/index.js';
+
+const assert = (condition, message) => {
+  if (!condition) {
+    throw new Error(message);
+  }
+
+};
+
+assert(
+  new JSONRegistry().stringify([]) === '[]',
+  'empty registry should not modify the result',
+);
 
 class Test {
   constructor(value) {
@@ -14,24 +26,34 @@ const { parse, stringify, recursive } = new JSONRegistry([
     from: (item) => Uint8Array.from(item),
   }],
   ['Test', {
-    is: (item) => item instanceof Test,
-    to: (item) => ({ value: item.value }),
-    from: ({ value }) => new Test(value),
+    is: item => item instanceof Test,
+    to: item => (new TextEncoder).encode(item.value),
+    from: item => new Test((new TextDecoder).decode(item)),
   }]
 ]);
 
-let result = stringify({
-  hello: (new TextEncoder).encode('world'),
-  test: new Test('test'),
+let stringified = stringify({
+  hello: new Test('world'),
   fn() {},
 });
 
-console.log({ stringify: result });
-console.log({ parse: parse(result) });
+// console.log(stringified);
 
-debugger;
+let parsed = parse(stringified);
+
+assert(
+  parsed.hello instanceof Test && parsed.hello.value === 'world',
+  'parsed value should be the same as the original',
+);
+
 const arr = [];
 arr.push(arr);
-result = recursive(flatted).stringify([arr, arr]);
-console.log(result);
-console.log(recursive(flatted).parse(result));
+
+stringified = recursive(flatted).stringify([arr, arr]);
+assert(stringified === '[["1","1",0],["1",0]]');
+
+parsed = recursive(flatted).parse(stringified);
+assert(
+  parsed[0] === parsed[1] && parsed[0][0] === parsed[1][0],
+  'circular references should be preserved',
+);

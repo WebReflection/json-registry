@@ -126,51 +126,66 @@ export default function JSONRegistry(iterable = []) {
       register,
 
       /** @type {JSONRegistryInstance['parse']} */
-      parse: (text, reviver) => run(
-        parse,
-        text,
-        typeof reviver === 'function' ?
-          /**
-           * @this {any}
-           * @param {string} key
-           * @returns {unknown}
-           */
-          function (key) {
-            // @ts-ignore
-            return _parse(key, reviver.apply(this, arguments));
-          } :
-          _parse
-        ,
-      ),
+      parse: (text, reviver) => registry.size ?
+        run(
+          parse,
+          text,
+          typeof reviver === 'function' ?
+            /**
+             * @this {any}
+             * @param {string} key
+             * @returns {unknown}
+             */
+            function (key) {
+              // @ts-ignore
+              return _parse(key, reviver.apply(this, arguments));
+            } :
+            _parse
+          ,
+        ) :
+        parse(text, reviver)
+      ,
 
       /** @type {JSONRegistryInstance['stringify']} */
-      stringify: (value, replacer, space) => run(
-        stringify,
-        value,
-        typeof replacer === 'function' ?
-          /**
-           * @this {any}
-           * @param {string} key
-           * @returns {unknown}
-           */
-          function (key) {
-            // @ts-ignore
-            return _stringify(key, replacer.apply(this, arguments));
-          } :
-          (isArray(replacer) ?
-            replace(_stringify, replacer.map(String)) :
-            _stringify
-          ),
-        space,
-      ),
+      stringify: (value, replacer, space) => registry.size ?
+        run(
+          stringify,
+          value,
+          typeof replacer === 'function' ?
+            /**
+             * @this {any}
+             * @param {string} key
+             * @returns {unknown}
+             */
+            function (key) {
+              // @ts-ignore
+              return _stringify(key, replacer.apply(this, arguments));
+            } :
+            (isArray(replacer) ?
+              replace(_stringify, replacer.map(String)) :
+              _stringify
+            ),
+          space,
+        ) :
+        // @ts-ignore
+        stringify(value, replacer, space)
+      ,
 
       /** @type {JSONRegistryInstance['recursive']} */
       recursive: ({ parse, stringify }) => ({
         /** @type {(text:string) => any} */
-        parse: text => run(parse, text, _parse),
+        parse: text => registry.size ?
+          run(parse, text, _parse) :
+          // @ts-ignore
+          parse(text)
+        ,
 
         /** @type {(value: any, space?: string | number) => string} */
-        stringify: (value, space) => run(stringify, value, _stringify, space),
+        stringify: (value, space) => registry.size ?
+          run(stringify, value, _stringify, space) :
+          // @ts-ignore
+          stringify(value, space)
+        ,
       }),
     },
   );

@@ -13,10 +13,10 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "npm run build:types",
+    "build": "npm run build:types && npm run test",
     "build:types": "tsc --allowJs --checkJs --declaration --emitDeclarationOnly --stripInternal --outDir types --target es2022 --lib es2024 --module nodenext --moduleResolution nodenext src/*.js",
     "coverage": "mkdir -p ./coverage; c8 report --reporter=text-lcov > ./coverage/lcov.info",
-    "test": "c8 node --localstorage-file './test/.storage' -e 'let q=Promise.resolve();for(const t of require(`./package.json`).tests)q=q.then(()=>import(`./test/${t}.js`));'"
+    "test": "c8 node test/index.js"
   },
   "files": [
     "src",
@@ -47,6 +47,7 @@
   },
   "devDependencies": {
     "c8": "^11.0.0",
+    "flatted": "^3.4.2",
     "typescript": "^6.0.3"
   }
 }
