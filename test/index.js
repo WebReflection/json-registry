@@ -57,3 +57,7 @@ assert(
   parsed[0] === parsed[1] && parsed[0][0] === parsed[1][0],
   'circular references should be preserved',
 );
+
+
+try { document.body.append('OK') }
+catch (em_all) {}
