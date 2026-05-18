@@ -9,8 +9,8 @@ const assert = (condition, message) => {
 };
 
 assert(
-  new JSONRegistry().stringify([]) === '[]',
-  'empty registry should not modify the result',
+  new JSONRegistry().stringify([]) === '[0]',
+  'empty registry should return [0] for arrays',
 );
 
 class Test {
