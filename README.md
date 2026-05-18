@@ -1,5 +1,14 @@
 # JSONRegistry
 
+[![Coverage Status](https://coveralls.io/repos/github/WebReflection/json-registry/badge.svg?branch=main)](https://coveralls.io/github/WebReflection/json-registry?branch=main)
+
+
+- - -
+
+⚠️ **highly experimental** and discussed as [ECMAScript proposal](https://es.discourse.group/t/jsonregistry-allows-branded-instances-in-regular-json/2569)
+
+- - -
+
 A registry for teaching `JSON.stringify()` and `JSON.parse()` how to
 round-trip application-specific values.
 
