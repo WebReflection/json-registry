@@ -39,32 +39,33 @@
  * natively ignores symbol keys, so they never reach the replacer.
  */
 
-const { assign } = Object;
+const OBJECT = 'object';
+const SYMBOL = 'symbol';
+const BIGINT = 'bigint';
+
+const { assign, keys } = Object;
 const { isArray } = Array;
 const { parse, stringify } = JSON;
 
 /**
- * @param {Map<string, JSONRecord<any>>} registry
- * @param {string} type
- * @returns {JSONRecord<any>}
+ * @param {unknown} value
+ * @returns {value is object}
  */
-const get = (registry, type) => {
-  const record = registry.get(type);
-  if (!record) fail(`Unknown JSONRegistry "${type}"`);
-  return record;
-};
+const isObject = value => value !== null && typeof value === 'object';
 
 /**
- * @template K
- * @template V
- * @param {Map<K, V>} cache
- * @param {K} ref
- * @param {V} value
- * @returns {V}
+ * @param {Map<unknown, unknown>} cache
+ * @param {unknown} ref
+ * @param {string} key
+ * @param {unknown} value
+ * @returns {{[key:string]: unknown}}
  */
-const set = (cache, ref, value) => {
-  cache.set(ref, value);
-  return value;
+const wrap = (cache, ref, key, value) => {
+  const obj = { [key]: value };
+  cache.set(ref, obj);
+  cache.set(value, null);
+  cache.set(obj, obj);
+  return obj;
 };
 
 /**
@@ -78,10 +79,11 @@ const fail = message => {
 /**
  * @param {Transformer} stringify
  * @param {string[]} replacer
+ * @param {Map<string, JSONRecord<any>>} registry
  * @returns {Transformer}
  */
-const replace = (stringify, replacer) => function (key, value) {
-  if (key === '' || isArray(this) || replacer.includes(key)) return stringify(key, value);
+const replace = (stringify, replacer, registry) => function (key, value) {
+  if (key === '' || key === OBJECT || registry.has(key) || isArray(this) || replacer.includes(key)) return stringify(key, value);
 };
 
 /**
@@ -95,7 +97,7 @@ export default function JSONRegistry(iterable = []) {
 
   /** @type {(key:string, value:JSONRecord<any>) => void} */
   const register = (key, { is, to, from }) => {
-    const valid = typeof key === 'string';
+    const valid = typeof key === 'string' && key !== '' && key !== OBJECT;
     const known = valid && registry.has(key);
 
     if (!valid || known)
@@ -137,7 +139,7 @@ export default function JSONRegistry(iterable = []) {
            */
           function (key) {
             // @ts-ignore
-            return _parse(key, reviver.apply(this, arguments));
+            return _parse.call(this, key, reviver.apply(this, arguments));
           } :
           _parse
         ,
@@ -158,7 +160,7 @@ export default function JSONRegistry(iterable = []) {
             return _stringify(key, replacer.apply(this, arguments));
           } :
           (isArray(replacer) ?
-            replace(_stringify, replacer.map(String)) :
+            replace(_stringify, replacer.map(String), registry) :
             _stringify
           ),
         space,
@@ -185,26 +187,50 @@ export default function JSONRegistry(iterable = []) {
 
   /**
    * @this {any}
-   * @param {string} _
+   * @param {string} key
    * @param {unknown} ref
    * @returns {unknown}
    */
-  function _parse(_, ref) {
-    if (ref === null || typeof ref !== 'object') return ref;
+  function _parse(key, ref) {
+    /** @type {string} */
+    let tag = '';
 
-    const cached = cache.get(ref);
-    if (cached != null) return cached;
+    if (!cache.has(this)) {
+      if (key !== '' && (key === OBJECT || registry.has(key)) && !isArray(this)) {
+        const tagKeys = keys(this);
+        if (tagKeys.length === 1 && tagKeys[0] === key) {
+          tag = key;
+        }
+      }
+      if (!tag) cache.set(this, null);
+    }
 
-    if (isArray(ref)) {
-      const k = ref.pop();
-      if (k !== 0) {
-        const v = get(registry, k).from(ref[0]);
-        if (v == null) fail(`Invalid "${k}" value`);
-        return set(cache, ref, v);
+    const value = ref;
+
+    if (isObject(ref)) {
+      const cached = /** @type {{k:string,p:json,v:unknown}|void} */(cache.get(/** @type {object} */(ref)));
+      if (cached != null) {
+        if (cached.v != null) return cached.v;
+        switch (cached.k) {
+          case OBJECT: {
+            cached.v = isObject(cached.p) && !isArray(cached.p) ? cached.p : ref;
+            break;
+          }
+          default: {
+            cached.v = /** @type {JSONRecord<any>} */(registry.get(cached.k)).from(cached.p) ?? fail(`Invalid "${cached.k}" value`);
+            break;
+          }
+        }
+        ref = cached.v;
       }
     }
 
-    return set(cache, ref, ref);
+    if (tag) {
+      cache.set(this, { k: tag, p: tag === OBJECT ? value : ref, v: null });
+      return ref;
+    }
+
+    return ref;
   }
 
   /**
@@ -214,25 +240,31 @@ export default function JSONRegistry(iterable = []) {
    * @returns {unknown}
    */
   function _stringify(_, ref) {
-    if (ref === null) return ref;
+    if (ref == null) return ref;
 
     const type = typeof ref;
     switch (type) {
-      case 'object': {
-        const cached = cache.get(/** @type {object} */(ref));
-        if (cached) return cached;
-        for (const [key, { is, to }] of registry)
-          if (is(ref)) return set(cache, /** @type {object} */(ref), [to(ref), key]);
-        // @ts-ignore
-        return set(cache, ref, isArray(ref) ? [].concat(ref, 0) : ref);
+      case OBJECT: {
+        const cached = cache.get(ref);
+        if (cached !== void 0) return cached || ref;
+
+        // const cached = cache.get(/** @type {object} */(ref));
+        // if (cached) return cached;
+
+        for (const [key, { is, to }] of registry) {
+          if (key !== SYMBOL && key !== BIGINT && is(ref))
+            return wrap(cache, ref, key, to(ref));
+        }
+
+        return isArray(ref) ? ref : wrap(cache, ref, OBJECT, ref);
       }
 
-      case 'symbol':
-      case 'bigint':
-        return registry.has(type) ?
-          [get(registry, type).to(ref), type] :
-          ref
-        ;
+      case SYMBOL:
+      case BIGINT: {
+        const record = registry.get(type);
+        if (record?.is(ref))
+          return wrap(cache, ref, type, record.to(ref));
+      }
 
       default: return ref;
     }
