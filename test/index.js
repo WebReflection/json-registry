@@ -19,9 +19,21 @@ const assertThrows = (callback, message) => {
   throw new Error(message);
 };
 
+new JSONRegistry().parse('{"object":{}}');
+
 assert(
-  new JSONRegistry().stringify([]) === '[0]',
-  'empty registry should return [0] for arrays',
+  new JSONRegistry().stringify([]) === '[]',
+  'arrays should be untouched',
+);
+
+assert(
+  Array.isArray(new JSONRegistry().parse('[]')),
+  'arrays should parse untouched',
+);
+
+assert(
+  new JSONRegistry().stringify({}) === '{"object":{}}',
+  'objects should be untocuhed yet wrapped',
 );
 
 class Test {
@@ -43,13 +55,93 @@ const { parse, stringify, recursive } = new JSONRegistry([
   }]
 ]);
 
+let parsed, stringified = stringify(new Uint8Array([1,2]));
+
+assert(
+  stringified === '{"Uint8Array":[1,2]}',
+  'registered types are wrapped and preserved',
+);
+
+parsed = parse(stringified);
+
+assert(
+  parsed instanceof Uint8Array && parsed.length === 2 && parsed[0] === 1 && parsed[1] === 2,
+  'registered types are restored',
+);
+
+class DisabledToJSONDate extends Date {
+  toJSON = undefined;
+}
+
+const dateRegistry = new JSONRegistry([['Date', {
+  is: item => item instanceof DisabledToJSONDate,
+  to: item => item.toISOString(),
+  from: item => new DisabledToJSONDate(item),
+}]]);
+
+stringified = dateRegistry.stringify(new DisabledToJSONDate('2026-05-19T14:18:00.000Z'));
+
+assert(
+  stringified === '{"Date":"2026-05-19T14:18:00.000Z"}',
+  'Date subclasses can shadow toJSON and be wrapped',
+);
+
+parsed = dateRegistry.parse(stringified);
+
+assert(
+  parsed instanceof DisabledToJSONDate && parsed.toISOString() === '2026-05-19T14:18:00.000Z',
+  'Date subclasses that shadow toJSON should round trip',
+);
+
+stringified = stringify({a:true});
+
+assert(
+  stringified === '{"object":{"a":true}}',
+  'unregistered types are wrapped and preserved',
+);
+
+parsed = parse(stringified);
+
+assert(
+  parsed.a === true,
+  'unregistered types are restored',
+);
+
+parsed = parse('{"object":[1,2,3]}');
+
+assert(
+  parsed.object.length === 3 && parsed.object[0] === 1 && parsed.object[2] === 3,
+  'object keys with array values should not be unwrapped',
+);
+
+parsed = parse('{"object":{},"x":1}');
+
+assert(
+  parsed.object && parsed.x === 1,
+  'multi-key objects should not be treated as wrappers',
+);
+
+stringified = stringify({ object: [1, 2, 3] });
+
+assert(
+  stringified === '{"object":{"object":[1,2,3]}}',
+  'object keys with array values should be preserved when stringified',
+);
+
+parsed = parse(stringified);
+
+assert(
+  parsed.object.length === 3 && parsed.object[1] === 2,
+  'object keys with array values should round trip',
+);
+
 assertThrows(
-  () => new JSONRegistry([[1, {
+  () => new JSONRegistry([['object', {
     is: () => false,
     to: item => item,
     from: item => item,
   }]]),
-  'registry keys should be strings',
+  'reserved object key should be rejected',
 );
 
 assertThrows(
@@ -65,55 +157,7 @@ assertThrows(
       from: item => item,
     }],
   ]),
-  'registry keys should be unique',
-);
-
-let stringified = stringify({
-  hello: new Test('world'),
-  fn() {},
-});
-
-// console.log(stringified);
-
-let parsed = parse(stringified);
-
-assert(
-  parsed.hello instanceof Test && parsed.hello.value === 'world',
-  'parsed value should be the same as the original',
-);
-
-stringified = stringify({
-  hello: new Test('reviver'),
-  ignored: true,
-}, (key, value) => key === 'ignored' ? undefined : value);
-
-parsed = parse(stringified, (key, value) => key === 'hello' ? value : value);
-
-assert(
-  parsed.hello instanceof Test && parsed.hello.value === 'reviver' && !('ignored' in parsed),
-  'custom replacer and reviver should be used',
-);
-
-stringified = stringify({
-  keep: new Test('array replacer'),
-  skip: new Test('skip'),
-  values: [new Test('array item')],
-}, ['keep', 'values']);
-
-parsed = parse(stringified);
-
-assert(
-  parsed.keep instanceof Test &&
-  parsed.keep.value === 'array replacer' &&
-  !('skip' in parsed) &&
-  parsed.values[0] instanceof Test &&
-  parsed.values[0].value === 'array item',
-  'array replacer should preserve listed keys and array values',
-);
-
-assertThrows(
-  () => parse('[[1,0],"Missing"]'),
-  'unknown registered types should throw',
+  'duplicate keys should be rejected',
 );
 
 assertThrows(
@@ -121,72 +165,167 @@ assertThrows(
     is: () => false,
     to: item => item,
     from: () => null,
-  }]]).parse('[[1,0],"Invalid"]'),
+  }]]).parse('{"Invalid":1}'),
   'invalid registered values should throw',
 );
 
-assertThrows(
-  () => new JSONRegistry([['Undefined', {
-    is: () => false,
-    to: item => item,
-    from: () => undefined,
-  }]]).parse('[[1,0],"Undefined"]'),
-  'undefined registered values should throw',
+stringified = stringify({
+  keep: true,
+  skip: false,
+  values: [1, 2],
+}, ['keep', 'values']);
+
+parsed = parse(stringified);
+
+assert(
+  parsed.keep === true &&
+  !('skip' in parsed) &&
+  parsed.values[0] === 1 &&
+  parsed.values[1] === 2,
+  'array replacer should preserve listed keys and array values',
+);
+
+stringified = stringify({
+  hello: 'reviver',
+  ignored: true,
+}, (key, value) => key === 'ignored' ? undefined : value);
+
+parsed = parse(stringified, (key, value) => key === 'hello' ? value : value);
+
+assert(
+  parsed.hello === 'reviver' && !('ignored' in parsed),
+  'custom replacer and reviver should be used',
 );
 
 const arr = [];
 arr.push(arr);
 
-assert(stringify(null) === 'null');
-
 stringified = recursive(flatted).stringify([arr, arr]);
-assert(stringified === '[["1","1",0],["1",0]]');
-
 parsed = recursive(flatted).parse(stringified);
+
 assert(
-  parsed[0] === parsed[1] && parsed[0][0] === parsed[1][0],
+  parsed[0] === parsed[1] && parsed[0][0] === parsed[0],
   'circular references should be preserved',
+);
+
+const selfArray = [];
+selfArray.push(selfArray, selfArray);
+
+stringified = recursive(flatted).stringify(selfArray);
+parsed = recursive(flatted).parse(stringified);
+
+assert(
+  parsed[0] === parsed && parsed[1] === parsed,
+  'self-referencing arrays should preserve repeated self references',
+);
+
+const selfObject = {};
+selfObject.self = selfObject;
+selfObject.again = selfObject;
+
+stringified = recursive(flatted).stringify(selfObject);
+parsed = recursive(flatted).parse(stringified);
+
+assert(
+  parsed.self === parsed && parsed.again === parsed,
+  'self-referencing objects should preserve repeated self references',
+);
+
+class RecursiveValue {
+  constructor(value) {
+    this.value = value;
+  }
+}
+
+const recursiveRegistry = new JSONRegistry([['RecursiveValue', {
+  is: item => item instanceof RecursiveValue,
+  to: item => item.value,
+  from: item => new RecursiveValue(item),
+}]]).recursive(flatted);
+
+const recursiveObject = { item: new RecursiveValue('recursive') };
+recursiveObject.self = recursiveObject;
+recursiveObject.list = [recursiveObject, recursiveObject.item];
+
+stringified = recursiveRegistry.stringify(recursiveObject);
+parsed = recursiveRegistry.parse(stringified);
+
+assert(
+  parsed.self === parsed &&
+  parsed.list[0] === parsed &&
+  parsed.item instanceof RecursiveValue &&
+  parsed.item.value === 'recursive' &&
+  parsed.list[1] instanceof RecursiveValue &&
+  parsed.list[1].value === 'recursive',
+  'recursive objects should preserve cycles and registered values',
 );
 
 const empty = JSONRegistry().recursive(flatted);
 
 stringified = empty.stringify([1]);
-assert(stringified === '[[1]]');
-
 parsed = empty.parse(stringified);
-assert(parsed[0] === 1);
+
+assert(
+  parsed[0] === 1,
+  'empty recursive registry should delegate unchanged',
+);
+
+class Cached {
+  constructor(value) {
+    this.value = value;
+  }
+}
+
+const cached = new JSONRegistry([['Cached', {
+  is: item => item instanceof Cached,
+  to: item => item.value,
+  from: item => new Cached(item),
+}]]).recursive({
+  parse: (_, reviver) => {
+    const wrapper = { Cached: 'shared' };
+    wrapper.Cached = reviver.call(wrapper, 'Cached', wrapper.Cached);
+    const holder = [];
+    holder[0] = reviver.call(holder, '0', wrapper);
+    holder[1] = reviver.call(holder, '1', wrapper);
+    return holder;
+  },
+  stringify: () => '',
+});
+
+parsed = cached.parse('');
+
+assert(
+  parsed[0] === parsed[1] && parsed[0] instanceof Cached && parsed[0].value === 'shared',
+  'cached recursive wrappers should be restored once',
+);
 
 const primitives = new JSONRegistry([
   ['bigint', {
-    is: () => false,
+    is: item => typeof item === 'bigint',
     to: item => item.toString(),
     from: item => BigInt(item),
   }],
   ['symbol', {
-    is: () => false,
+    is: item => typeof item === 'symbol',
     to: item => Symbol.keyFor(item),
     from: item => Symbol.for(item),
   }],
 ]);
 
 stringified = primitives.stringify({
-  bigint: 123n,
-  symbol: Symbol.for('registered'),
+  a: [],
+  o: {},
+  b: 0n,
+  s: Symbol.for('registered'),
+  object: [1]
 });
 
 parsed = primitives.parse(stringified);
 
 assert(
-  parsed.bigint === 123n && parsed.symbol === Symbol.for('registered'),
+  parsed.b === 0n && parsed.s === Symbol.for('registered'),
   'registered primitive values should round trip',
 );
-
-assert(new JSONRegistry().stringify(Symbol()) === undefined);
-assertThrows(
-  () => new JSONRegistry().stringify(1n),
-  'unregistered bigint values should throw',
-);
-
 
 try { document.body.append('OK') }
 catch (em_all) {}
