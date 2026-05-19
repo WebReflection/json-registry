@@ -1,6 +1,6 @@
 {
   "name": "json-registry",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "types": "./types/index.d.ts",
   "main": "src/index.js",
