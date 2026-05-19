@@ -154,6 +154,25 @@ copy.list[1] instanceof Item; // true
   `JSON.stringify()` passes the result of `toJSON()` to the registry, not the
   original value. Remove or account for `toJSON()` when a registered type must
   be preserved exactly.
+  For built-ins such as `Date`, shadow the method with a non-callable value so
+  the registry replacer can see the instance:
+
+  ```js
+  class RegistryDate extends Date {
+    toJSON = undefined;
+  }
+
+  const registry = new JSONRegistry([
+    ['Date', {
+      is: value => value instanceof RegistryDate,
+      to: value => value.toISOString(),
+      from: value => new RegistryDate(value),
+    }],
+  ]);
+  ```
+
+  Returning `undefined` from a `toJSON()` method is not equivalent: it tells
+  native `JSON.stringify()` to omit that value before the registry can handle it.
 - Symbol keys are ignored by `JSON.stringify()` itself, so they never reach the
   replacer and cannot be preserved as object keys. Symbols can still be
   registered and transformed when they appear as values.

@@ -69,6 +69,30 @@ assert(
   'registered types are restored',
 );
 
+class DisabledToJSONDate extends Date {
+  toJSON = undefined;
+}
+
+const dateRegistry = new JSONRegistry([['Date', {
+  is: item => item instanceof DisabledToJSONDate,
+  to: item => item.toISOString(),
+  from: item => new DisabledToJSONDate(item),
+}]]);
+
+stringified = dateRegistry.stringify(new DisabledToJSONDate('2026-05-19T14:18:00.000Z'));
+
+assert(
+  stringified === '{"Date":"2026-05-19T14:18:00.000Z"}',
+  'Date subclasses can shadow toJSON and be wrapped',
+);
+
+parsed = dateRegistry.parse(stringified);
+
+assert(
+  parsed instanceof DisabledToJSONDate && parsed.toISOString() === '2026-05-19T14:18:00.000Z',
+  'Date subclasses that shadow toJSON should round trip',
+);
+
 stringified = stringify({a:true});
 
 assert(
